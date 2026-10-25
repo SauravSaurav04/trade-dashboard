@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#131722">
+  <title>Trading Journal Analytics</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============================ HEADER ============================ -->
+<header class="topbar">
+  <div class="brand">
+    <a class="logo" href="#top" tabindex="-1" aria-hidden="true">&#9650;</a>
+    <div class="brand-text">
+      <h1><a class="brand-link" href="#top" title="Back to top">Trading Journal Analytics</a></h1>
+      <p id="subtitle" class="muted">No file loaded</p>
+    </div>
+  </div>
+  <nav id="mainNav" class="nav" aria-label="Sections" hidden>
+    <a href="#overview">Overview</a>
+    <a href="#performance">Performance</a>
+    <a href="#pnl" data-also="pnlPeriod">P&amp;L</a>
+    <a href="#risk">Risk</a>
+    <a href="#calendar">Calendar</a>
+    <a href="#breakdown">Breakdown</a>
+    <a href="#insights">Insights</a>
+    <a href="#tradeLog">Trade log</a>
+  </nav>
+  <div class="actions">
+    <button type="button" id="filterToggle" class="btn ghost filter-toggle" aria-expanded="false" aria-controls="filterBar" aria-keyshortcuts="f" hidden>
+      Filter <span id="filterCount" class="count-badge" hidden>0</span>
+    </button>
+    <label class="btn" for="fileInput">Open<span class="hide-sm"> trades CSV</span></label>
+    <input id="fileInput" type="file" accept=".csv,.md,.markdown,.txt" hidden>
+  </div>
+  <div id="filterStrip" class="filter-strip" role="group" aria-label="Active filters" hidden>
+    <span id="stripCount" class="strip-count"></span>
+    <div id="stripChips" class="strip-chips"></div>
+    <button type="button" id="stripReset" class="btn ghost strip-reset">Reset</button>
+  </div>
+</header>
+
+<!-- ============================ FILTER DRAWER ============================ -->
+<div id="filterBackdrop" class="drawer-backdrop"></div>
+<aside id="filterBar" class="filter-drawer" role="dialog" aria-label="Filters">
+  <div class="drawer-head">
+    <h2>Filters</h2>
+    <button type="button" id="filterClose" class="icon-btn" aria-label="Close filters">&times;</button>
+  </div>
+  <p id="filterSummary" class="filter-summary" role="status" aria-live="polite"></p>
+  <div id="activeChips" class="active-chips" hidden></div>
+
+  <div id="filterBody" class="filter-body">
+    <div class="f-group" role="group" aria-labelledby="dateLabel">
+      <span id="dateLabel" class="f-label">Date range (trading day)</span>
+      <div class="f-row">
+        <label for="fDateFrom" class="f-sub">From</label><input type="date" id="fDateFrom" class="f-input">
+        <label for="fDateTo" class="f-sub">To</label><input type="date" id="fDateTo" class="f-input">
+      </div>
+      <div id="datePresets" class="f-row" role="group" aria-label="Date presets"></div>
+      <span id="dateMsg" class="f-msg" role="status"></span>
+    </div>
+
+    <div id="symbolFilter" class="f-group">
+      <label for="symbolBtn" class="f-label">Symbol</label>
+      <button type="button" id="symbolBtn" class="f-input ms-btn" aria-haspopup="true" aria-expanded="false" aria-controls="symbolMenu">All symbols</button>
+      <div id="symbolMenu" class="ms-menu" role="group" aria-label="Symbol options" hidden></div>
+    </div>
+
+    <div class="f-group" role="group" aria-labelledby="sideLabel">
+      <span id="sideLabel" class="f-label">Side</span>
+      <div id="sideToggle" class="toggle">
+        <button type="button" data-value="all" aria-pressed="true">All</button>
+        <button type="button" data-value="buy" aria-pressed="false">Buy</button>
+        <button type="button" data-value="sell" aria-pressed="false">Sell</button>
+      </div>
+    </div>
+
+    <div class="f-group" role="group" aria-labelledby="outcomeLabel">
+      <span id="outcomeLabel" class="f-label">Outcome</span>
+      <div id="outcomeToggle" class="toggle">
+        <button type="button" data-value="all" aria-pressed="true">All</button>
+        <button type="button" data-value="win" aria-pressed="false">Wins</button>
+        <button type="button" data-value="loss" aria-pressed="false">Losses</button>
+      </div>
+    </div>
+
+    <div class="f-group" role="group" aria-labelledby="weekdayLabel">
+      <span id="weekdayLabel" class="f-label">Weekday</span>
+      <div id="weekdayChips" class="f-row"></div>
+    </div>
+
+    <div id="hourGroup" class="f-group" role="group" aria-labelledby="hourLabel">
+      <span id="hourLabel" class="f-label">Close hour (0&ndash;23)</span>
+      <div class="f-row">
+        <label for="fHourFrom" class="f-sub">From</label><input type="number" id="fHourFrom" class="f-input num" min="0" max="23" step="1" inputmode="numeric">
+        <label for="fHourTo" class="f-sub">To</label><input type="number" id="fHourTo" class="f-input num" min="0" max="23" step="1" inputmode="numeric">
+      </div>
+      <span class="f-note" hidden>Unavailable: this file has no trade times.</span>
+    </div>
+
+    <div id="setupFilter" class="f-group">
+      <label for="setupBtn" class="f-label">Setup</label>
+      <button type="button" id="setupBtn" class="f-input ms-btn" aria-haspopup="true" aria-expanded="false" aria-controls="setupMenu">All setups</button>
+      <div id="setupMenu" class="ms-menu" role="group" aria-label="Setup options" hidden></div>
+    </div>
+
+    <div class="f-group" role="group" aria-labelledby="tagLabel">
+      <span id="tagLabel" class="f-label">Behaviour tag (any of)</span>
+      <div id="tagChips" class="f-row"></div>
+    </div>
+
+    <div id="holdGroup" class="f-group" role="group" aria-labelledby="holdLabel">
+      <span id="holdLabel" class="f-label">Hold time (min)</span>
+      <div class="f-row">
+        <label for="fHoldMin" class="f-sub">Min</label><input type="number" id="fHoldMin" class="f-input num" min="0" step="any" inputmode="decimal">
+        <label for="fHoldMax" class="f-sub">Max</label><input type="number" id="fHoldMax" class="f-input num" min="0" step="any" inputmode="decimal">
+      </div>
+      <span class="f-note" hidden>Unavailable: this file has no trade times.</span>
+    </div>
+
+    <div class="f-group" role="group" aria-labelledby="pnlLabel">
+      <span id="pnlLabel" class="f-label">Net P&amp;L ($)</span>
+      <div class="f-row">
+        <label for="fPnlMin" class="f-sub">Min</label><input type="number" id="fPnlMin" class="f-input num" step="any" inputmode="decimal">
+        <label for="fPnlMax" class="f-sub">Max</label><input type="number" id="fPnlMax" class="f-input num" step="any" inputmode="decimal">
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer-foot">
+    <button type="button" id="filterReset" class="btn ghost">Reset all</button>
+    <button type="button" id="filterDone" class="btn">Show results</button>
+  </div>
+</aside>
+
+<div id="errorBanner" class="banner error" hidden></div>
+<div id="chartBanner" class="banner warn" hidden>
+  Chart.js could not be loaded (the CDN needs an internet connection). Tables and statistics still work; charts are disabled.
+</div>
+
+<!-- Shown until a file is loaded -->
+<section id="emptyState" class="empty-state">
+  <h2>Load your trade history</h2>
+  <p>Click <strong>Open trades CSV</strong> or drop a broker export anywhere on this page.</p>
+  <p class="hint">Nothing is uploaded; the file is read in your browser.</p>
+  <p class="empty-actions">
+    <button type="button" id="sampleLoad" class="btn">Load sample data</button>
+    <button type="button" id="templateDownload" class="btn ghost">Download CSV template</button>
+  </p>
+  <table class="tbl cols-table">
+    <caption class="hint">Expected columns (one row per closed trade; headers are matched by name, in any order)</caption>
+    <thead><tr><th scope="col">Column</th><th scope="col">Required</th><th scope="col">Example / meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Trade No</td><td>Yes (unique)</td><td>1 (unique whole number, your actual trade number)</td></tr>
+      <tr><td>Symbol</td><td>Yes</td><td>XAUUSD</td></tr>
+      <tr><td>Side</td><td>Yes</td><td>Buy / Sell</td></tr>
+      <tr><td>Open Date, Close Date</td><td>Yes</td><td>10/09/2026, 11:00:02 or 2026-10-09 11:00:02</td></tr>
+      <tr><td>Entry Price, Exit Price</td><td>No</td><td>2650 / 2675.5</td></tr>
+      <tr><td>Qty</td><td>Yes</td><td>0.5</td></tr>
+      <tr><td>Fee, Swap Fees</td><td>No</td><td>15 / -5.5</td></tr>
+      <tr><td>Net P&amp;L</td><td>Yes</td><td>234.5 (after fee and swap)</td></tr>
+      <tr><td>Entry Chart Video Link, Exit Chart Video Link</td><td>No</td><td>https://drive.google.com/file/d/… (http or https link to your entry / exit recording; shown as a link in the Trade Log)</td></tr>
+      <tr><td>Outcome</td><td>No</td><td>1 = the trade followed your strategy (take it again), 0 = it did not</td></tr>
+      <tr><td>Entry Setup Score, Risk Management Score, Stop Loss Discipline Score, Exit Management Score, Emotion Control Score</td><td>No</td><td>Whole number from 1 to 5 for each. The total out of 25 is shown when all five are filled in; the Trade Log footer shows the average total as a percentage of 25</td></tr>
+      <tr><td>Entry Reason, Exit Reason</td><td>No</td><td>Free text, e.g. "Rejected the 200 EMA on 30M" / "Hit the stop loss". Your own notes; not used in the statistics</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<main id="dashboard" hidden>
+
+  <!-- Shown instead of the dashboard when the filters match no trades -->
+  <section id="filterEmpty" class="empty-state filter-empty" hidden>
+    <h2>No trades match the current filters</h2>
+    <p>Widen or remove a filter to see your data again.</p>
+    <p><button type="button" id="filterEmptyReset" class="btn">Reset all filters</button></p>
+  </section>
+
+<div id="dashboardContent">
+
+  <!-- ============================ OVERVIEW ============================ -->
+  <section id="overview" class="dash-section" aria-label="Overview">
+    <div id="disciplineCard" class="discipline" role="group" aria-label="Discipline Score" hidden></div>
+    <div id="outcomeCard" class="discipline outcome-card" role="group" aria-label="Outcome" hidden></div>
+        <div id="dailyDisciplineCard" class="discipline daily-card" role="group" aria-label="Daily Discipline Score" hidden></div>    <div id="kpiGrid" class="kpi-grid"></div>
+  </section>
+
+  <!-- ============================ PERFORMANCE OVER TIME ============================ -->
+  <section id="performance" class="dash-section" aria-labelledby="performanceTitle">
+    <header class="section-head">
+      <h2 id="performanceTitle" class="section-title">Performance over time</h2>
+      <p class="section-desc">How the account grew, how deep it fell, and which days and trades drove it.</p>
+    </header>
+    <div class="grid">
+      <article id="equity" class="panel span-12">
+        <div class="panel-head">
+          <div><h3>Equity Curve</h3><span class="hint">Cumulative all-in P&amp;L per trade (green above $0, red below) with running peak. Shaded bands group trades by trading day.<span class="filter-note" hidden> Filtered set, starts at $0.</span></span></div>
+          <div id="equityToggle" class="toggle" role="group" aria-label="Equity chart type">
+            <button type="button" class="active" data-type="line" aria-pressed="true">Line</button>
+            <button type="button" data-type="bar" aria-pressed="false">Bar</button>
+          </div>
+        </div>
+        <div class="chart-box tall"><canvas id="equityChart" role="img" aria-label="Equity curve"></canvas></div>
+        <div class="panel-head sub-head"><h3>Drawdown</h3><span class="hint">Distance from the running equity peak<span class="filter-note" hidden> Filtered set, starts at $0.</span></span></div>
+        <div class="chart-box short"><canvas id="drawdownChart" role="img" aria-label="Drawdown chart"></canvas></div>
+      </article>
+      <article id="pnl" class="panel span-12">
+        <div class="panel-head">
+          <div><h3>P&amp;L Per Trade</h3><span class="hint">Net all-in P&amp;L of each trade. Click "Avg per trade" in the legend to show the average (expectancy).</span></div>
+          <div id="pnlToggle" class="toggle" role="group" aria-label="P&amp;L chart type">
+            <button type="button" data-type="line" aria-pressed="false">Line</button>
+            <button type="button" class="active" data-type="bar" aria-pressed="true">Bar</button>
+          </div>
+        </div>
+        <div class="chart-box"><canvas id="pnlCurveChart" role="img" aria-label="P&amp;L per trade"></canvas></div>
+      </article>
+      <article id="pnlPeriod" class="panel span-12">
+        <div class="panel-head">
+          <div><h3>P&amp;L By Period</h3><span class="hint">Net P&amp;L per trading day, Mon&ndash;Sun week or calendar month</span></div>
+          <div id="periodToggle" class="toggle" role="group" aria-label="P&amp;L period">
+            <button type="button" class="active" data-period="daily" aria-pressed="true">Daily</button>
+            <button type="button" data-period="weekly" aria-pressed="false">Weekly</button>
+            <button type="button" data-period="monthly" aria-pressed="false">Monthly</button>
+          </div>
+        </div>
+        <div class="chart-box"><canvas id="periodChart" role="img" aria-label="P&amp;L by period"></canvas></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ RISK / REWARD + STREAKS ============================ -->
+  <section id="risk" class="dash-section" aria-labelledby="riskTitle">
+    <header class="section-head">
+      <h2 id="riskTitle" class="section-title">Risk and reward</h2>
+      <p class="section-desc">Whether wins are big enough for the win rate, and how losses cluster.</p>
+    </header>
+    <div class="grid">
+      <article class="panel span-4">
+        <div class="panel-head"><h3>Outcome Mix</h3><span class="hint">Wins vs losses</span></div>
+        <div class="chart-box short"><canvas id="outcomeChart" role="img" aria-label="Outcome mix"></canvas></div>
+      </article>
+      <article class="panel span-8">
+        <div class="panel-head"><h3>R-Multiple Distribution</h3><span class="hint">1R = average loss</span></div>
+        <div class="chart-box short"><canvas id="rChart" role="img" aria-label="R-multiple distribution"></canvas></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Risk &amp; Reward</h3><span class="hint">Payoff, break-even and edge</span></div>
+        <div class="chart-box short"><canvas id="rrChart" role="img" aria-label="Risk and reward"></canvas></div>
+        <div id="rrStats" class="stat-list"></div>
+      </article>
+      <article id="streaks" class="panel span-6">
+        <div class="panel-head"><h3>Streak Analysis</h3><span class="hint">Consecutive wins / losses<span class="filter-note" hidden> Streaks run across consecutive trades in the filtered list.</span></span></div>
+        <div id="streakStats" class="stat-list"></div>
+      </article>
+      <article class="panel span-12">
+        <div class="panel-head"><h3>Streak Timeline</h3><span class="hint">Bar height = streak length (wins up, losses down)</span></div>
+        <div class="chart-box short"><canvas id="streakChart" role="img" aria-label="Streak timeline"></canvas></div>
+        <div id="streakStrip" class="strip" aria-label="Trade sequence"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ CALENDAR ============================ -->
+  <section id="calendar" class="dash-section" aria-labelledby="calendarTitle">
+    <header class="section-head">
+      <h2 id="calendarTitle" class="section-title">Calendar</h2>
+      <p class="section-desc">Your trading days at a glance: daily P&amp;L and trades, plus performance by weekday and hour.</p>
+    </header>
+    <div class="grid">
+      <article id="calendarPanel" class="panel span-12">
+        <div class="panel-head"><h3>Calendar</h3><span class="hint">Daily P&amp;L, trades, win/loss and equity, with weekly totals</span></div>
+        <div class="cal-toolbar">
+          <div class="cal-nav">
+            <button id="calPrev" type="button" class="btn ghost cal-btn" aria-label="Previous month">&#8249;</button>
+            <div id="calTitle" class="cal-title" aria-live="polite"></div>
+            <button id="calNext" type="button" class="btn ghost cal-btn" aria-label="Next month">&#8250;</button>
+            <button id="calLatest" type="button" class="btn ghost cal-btn cal-latest">Latest</button>
+          </div>
+          <dl id="calSummary" class="cal-summary"></dl>
+        </div>
+        <div id="calScroll" class="cal-scroll"><div id="calGrid" class="cal-grid" role="group" aria-label="Monthly calendar"></div></div>
+        <p id="calScrollHint" class="hint pad" hidden>Scroll sideways to see the full calendar.</p>
+        <div id="calDetail" class="cal-detail" role="region" aria-label="Day detail" hidden></div>
+        <p class="hint pad">Monday start. Each day shows trades (T), wins/losses (W/L), gross profit (P) / gross loss (L), net P&amp;L, and ending equity (E). Green/red shade = net P&amp;L; darker = larger |net P&amp;L| within the month. Week totals cover the days of the displayed month only. Click a day for its trades; PageUp/PageDown change month and arrow keys move between days.</p>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Weekday</h3><span class="hint">Net P&amp;L (bars) and win rate (line)</span></div>
+        <div class="chart-box"><canvas id="weekdayChart" role="img" aria-label="Performance by weekday"></canvas></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Hour</h3><span class="hint">Net P&amp;L (bars) and trade count (line), by close hour<span id="hourNote" class="filter-note" hidden> Not filterable for a journal .md.</span></span></div>
+        <div class="chart-box"><canvas id="hourChart" role="img" aria-label="Performance by hour"></canvas></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ BREAKDOWN ============================ -->
+  <section id="breakdown" class="dash-section" aria-labelledby="breakdownTitle">
+    <header class="section-head">
+      <h2 id="breakdownTitle" class="section-title">Where the edge is, and is not</h2>
+      <p class="section-desc">Results by instrument, setup and behaviour, plus the trades that moved the account most.</p>
+    </header>
+    <div class="grid">
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Instrument</h3><span class="hint">Net P&amp;L</span></div>
+        <div class="chart-box short"><canvas id="symbolChart" role="img" aria-label="Performance by instrument"></canvas></div>
+        <div id="symbolTable" class="table-wrap"></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Setup</h3><span class="hint">Setup inferred from trade timing and behaviour (no explicit strategy field)</span></div>
+        <div class="chart-box short"><canvas id="setupChart" role="img" aria-label="Performance by setup"></canvas></div>
+        <div id="setupTable" class="table-wrap"></div>
+      </article>
+      <article class="panel span-12">
+        <div class="panel-head"><h3>Behaviour Tags</h3><span class="hint">Tags derived from trade timing (a trade can carry several)</span></div>
+        <div id="tagTable" class="table-wrap"></div>
+      </article>
+      <article id="trades" class="panel span-6">
+        <div class="panel-head"><h3>Best Trades</h3><span class="hint">Top 5 by net P&amp;L</span></div>
+        <div id="bestTable" class="table-wrap"></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Worst Trades</h3><span class="hint">Bottom 5 by net P&amp;L</span></div>
+        <div id="worstTable" class="table-wrap"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ INSIGHTS ============================ -->
+  <section id="insights" class="dash-section" aria-labelledby="insightsTitle">
+    <header class="section-head">
+      <h2 id="insightsTitle" class="section-title">Behaviour and actions</h2>
+      <p class="section-desc">What the numbers say about your habits, and what to change first.</p>
+    </header>
+    <div class="grid">
+      <article id="psychology" class="panel span-6">
+        <div class="panel-head"><h3>Trading Psychology Insights</h3><span class="hint">Derived from trade timing and sequence behaviour</span></div>
+        <div id="insightGrid" class="card-grid one-col"></div>
+      </article>
+      <article id="actions" class="panel span-6">
+        <div class="panel-head"><h3>Actionable Recommendations</h3><span class="hint">Generated from the computed statistics, highest priority first</span></div>
+        <div id="recGrid" class="card-grid one-col"></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============================ TRADE LOG + JOURNAL NOTES ============================ -->
+  <section id="tradeLog" class="dash-section" aria-labelledby="tradeLogTitle">
+    <header class="section-head">
+      <h2 id="tradeLogTitle" class="section-title">Trade log</h2>
+      <p class="section-desc">Reference data: every trade in view, plus the notes written in a journal .md.</p>
+    </header>
+
+    <details id="allTradesBox" class="collapsible" open>
+      <summary><h3 class="collapse-title">All Trades</h3><span class="hint">Every trade passing the active filters. Click a header to sort. Search also matches hidden Setup and Notes; use #3 to find Trade No 3.</span></summary>
+      <div class="grid">
+        <article class="panel span-12">
+          <div class="tradelog-controls">
+            <div class="tl-field">
+              <label for="tradeLogSearch" class="f-label">Search</label>
+              <input type="search" id="tradeLogSearch" class="f-input" placeholder="Symbol, side, setup, notes, or Trade No (e.g. #3)" autocomplete="off">
+            </div>
+            <div id="tradeColFilter" class="tl-cols">
+              <button type="button" id="tradeColBtn" class="f-input ms-btn" aria-haspopup="true" aria-expanded="false" aria-controls="tradeColMenu">Columns</button>
+              <div id="tradeColMenu" class="ms-menu tl-col-menu" role="group" aria-label="Column options" hidden>
+                <div class="tl-col-actions">
+                  <button type="button" id="tradeColAll" class="btn ghost">Show all</button>
+                  <button type="button" id="tradeColReset" class="btn ghost">Reset to default</button>
+                </div>
+                <div id="tradeColList"></div>
+              </div>
+            </div>
+            <div class="tl-field">
+              <label for="tradeLogPageSize" class="f-label">Rows per page</label>
+              <select id="tradeLogPageSize" class="f-input">
+                <option value="10" selected>10</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="all">All</option>
+              </select>
+            </div>
+            <button type="button" id="tradeLogExport" class="btn ghost">Export CSV</button>
+          </div>
+
+          <div id="tradeLogTable" class="table-wrap tradelog-scroll"></div>
+
+          <div id="tradeLogPager" class="tradelog-pager">
+            <button type="button" class="btn ghost" data-page="prev">Previous</button>
+            <span id="tradeLogStatus" class="hint" role="status" aria-live="polite"></span>
+            <button type="button" class="btn ghost" data-page="next">Next</button>
+          </div>
+        </article>
+      </div>
+    </details>
+
+    <details id="journalNotes" class="collapsible" open>
+      <summary><h3 class="collapse-title">Journal findings and recommendations</h3><span class="hint">Written in your journal .md (sections 11 and 12)</span></summary>
+      <div class="grid">
+        <article class="panel span-6">
+          <div class="panel-head"><h3>Key Findings From Your Journal</h3><span class="hint">Section 11 of a journal .md</span></div>
+          <ol id="journalFindings" class="text-list"></ol>
+        </article>
+        <article class="panel span-6">
+          <div class="panel-head"><h3>Recommendations In Your Journal</h3><span class="hint">Section 12 of a journal .md</span></div>
+          <ul id="journalRecs" class="text-list"></ul>
+        </article>
+      </div>
+    </details>
+  </section>
+
+</div>
+</main>
+
+<footer class="footer">
+  <p>All figures are net of commission and swap (all-in), computed from the loaded file. Nothing leaves your browser.</p>
+</footer>
+
+<div id="dropOverlay" class="drop-overlay" hidden>Drop trades CSV to analyse</div>
+
+<!-- Chart.js (CDN). Requires an internet connection the first time the page is opened. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+<script src="script.js"></script>
+</body>
+</html>
