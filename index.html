@@ -22,12 +22,11 @@
   <nav id="mainNav" class="nav" aria-label="Sections" hidden>
     <a href="#overview">Overview</a>
     <a href="#performance">Performance</a>
-    <a href="#pnl" data-also="pnlPeriod">P&amp;L</a>
-    <a href="#risk">Risk</a>
     <a href="#calendar">Calendar</a>
-    <a href="#breakdown">Breakdown</a>
+    <a href="#streak">Streak</a>
     <a href="#insights">Insights</a>
-    <a href="#tradeLog">Trade log</a>
+    <a href="#score">Score</a>
+    <a href="#trades">Trades</a>
   </nav>
   <div class="actions">
     <button type="button" id="filterToggle" class="btn ghost filter-toggle" aria-expanded="false" aria-controls="filterBar" aria-keyshortcuts="f" hidden>
@@ -173,6 +172,9 @@
 
 <main id="dashboard" hidden>
 
+  <!-- Daily accountability card: ignores the filters, so it lives outside #dashboardContent -->
+  <section id="dailyLimitsCard" class="daily-limits" data-page="overview" role="region" aria-label="Today's trading limits" hidden></section>
+
   <!-- Shown instead of the dashboard when the filters match no trades -->
   <section id="filterEmpty" class="empty-state filter-empty" hidden>
     <h2>No trades match the current filters</h2>
@@ -183,17 +185,26 @@
 <div id="dashboardContent">
 
   <!-- ============================ OVERVIEW ============================ -->
-  <section id="overview" class="dash-section" aria-label="Overview">
+  <section id="overview" class="dash-section" data-page="overview" aria-label="Overview">
+    <div id="kpiGrid" class="kpi-grid"></div>
+  </section>
+
+  <!-- ============================ SCORE ============================ -->
+  <section id="score" class="dash-section" data-page="score" aria-labelledby="scoreTitle">
+    <header class="section-head">
+      <h2 id="scoreTitle" class="section-title">Score</h2>
+      <p class="section-desc">How well you followed your process: discipline, trade selection and daily discipline.</p>
+    </header>
     <div id="disciplineCard" class="discipline" role="group" aria-label="Discipline Score" hidden></div>
     <div id="outcomeCard" class="discipline outcome-card" role="group" aria-label="Outcome" hidden></div>
-        <div id="dailyDisciplineCard" class="discipline daily-card" role="group" aria-label="Daily Discipline Score" hidden></div>    <div id="kpiGrid" class="kpi-grid"></div>
+    <div id="dailyDisciplineCard" class="discipline daily-card" role="group" aria-label="Daily Discipline Score" hidden></div>
   </section>
 
   <!-- ============================ PERFORMANCE OVER TIME ============================ -->
-  <section id="performance" class="dash-section" aria-labelledby="performanceTitle">
+  <section id="performance" class="dash-section" data-page="performance" aria-labelledby="performanceTitle">
     <header class="section-head">
-      <h2 id="performanceTitle" class="section-title">Performance over time</h2>
-      <p class="section-desc">How the account grew, how deep it fell, and which days and trades drove it.</p>
+      <h2 id="performanceTitle" class="section-title">Performance</h2>
+      <p class="section-desc">How the account grew, how deep it fell, whether wins are big enough for the win rate, and where the edge is and is not.</p>
     </header>
     <div class="grid">
       <article id="equity" class="panel span-12">
@@ -229,16 +240,6 @@
         </div>
         <div class="chart-box"><canvas id="periodChart" role="img" aria-label="P&amp;L by period"></canvas></div>
       </article>
-    </div>
-  </section>
-
-  <!-- ============================ RISK / REWARD + STREAKS ============================ -->
-  <section id="risk" class="dash-section" aria-labelledby="riskTitle">
-    <header class="section-head">
-      <h2 id="riskTitle" class="section-title">Risk and reward</h2>
-      <p class="section-desc">Whether wins are big enough for the win rate, and how losses cluster.</p>
-    </header>
-    <div class="grid">
       <article class="panel span-4">
         <div class="panel-head"><h3>Outcome Mix</h3><span class="hint">Wins vs losses</span></div>
         <div class="chart-box short"><canvas id="outcomeChart" role="img" aria-label="Outcome mix"></canvas></div>
@@ -247,28 +248,41 @@
         <div class="panel-head"><h3>R-Multiple Distribution</h3><span class="hint">1R = average loss</span></div>
         <div class="chart-box short"><canvas id="rChart" role="img" aria-label="R-multiple distribution"></canvas></div>
       </article>
-      <article class="panel span-6">
+      <article class="panel span-12">
         <div class="panel-head"><h3>Risk &amp; Reward</h3><span class="hint">Payoff, break-even and edge</span></div>
         <div class="chart-box short"><canvas id="rrChart" role="img" aria-label="Risk and reward"></canvas></div>
         <div id="rrStats" class="stat-list"></div>
       </article>
-      <article id="streaks" class="panel span-6">
-        <div class="panel-head"><h3>Streak Analysis</h3><span class="hint">Consecutive wins / losses<span class="filter-note" hidden> Streaks run across consecutive trades in the filtered list.</span></span></div>
-        <div id="streakStats" class="stat-list"></div>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Weekday</h3><span class="hint">Net P&amp;L (bars) and win rate (line)</span></div>
+        <div class="chart-box"><canvas id="weekdayChart" role="img" aria-label="Performance by weekday"></canvas></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Hour</h3><span class="hint">Net P&amp;L (bars) and trade count (line), by close hour<span id="hourNote" class="filter-note" hidden> Not filterable for a journal .md.</span></span></div>
+        <div class="chart-box"><canvas id="hourChart" role="img" aria-label="Performance by hour"></canvas></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Instrument</h3><span class="hint">Net P&amp;L</span></div>
+        <div class="chart-box short"><canvas id="symbolChart" role="img" aria-label="Performance by instrument"></canvas></div>
+        <div id="symbolTable" class="table-wrap"></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Performance by Setup</h3><span class="hint">Setup inferred from trade timing and behaviour (no explicit strategy field)</span></div>
+        <div class="chart-box short"><canvas id="setupChart" role="img" aria-label="Performance by setup"></canvas></div>
+        <div id="setupTable" class="table-wrap"></div>
       </article>
       <article class="panel span-12">
-        <div class="panel-head"><h3>Streak Timeline</h3><span class="hint">Bar height = streak length (wins up, losses down)</span></div>
-        <div class="chart-box short"><canvas id="streakChart" role="img" aria-label="Streak timeline"></canvas></div>
-        <div id="streakStrip" class="strip" aria-label="Trade sequence"></div>
+        <div class="panel-head"><h3>Behaviour Tags</h3><span class="hint">Tags derived from trade timing (a trade can carry several)</span></div>
+        <div id="tagTable" class="table-wrap"></div>
       </article>
     </div>
   </section>
 
   <!-- ============================ CALENDAR ============================ -->
-  <section id="calendar" class="dash-section" aria-labelledby="calendarTitle">
+  <section id="calendar" class="dash-section" data-page="calendar" aria-labelledby="calendarTitle">
     <header class="section-head">
       <h2 id="calendarTitle" class="section-title">Calendar</h2>
-      <p class="section-desc">Your trading days at a glance: daily P&amp;L and trades, plus performance by weekday and hour.</p>
+      <p class="section-desc">Review your trading days: daily P&amp;L and trades, and the trades behind each day.</p>
     </header>
     <div class="grid">
       <article id="calendarPanel" class="panel span-12">
@@ -287,53 +301,32 @@
         <div id="calDetail" class="cal-detail" role="region" aria-label="Day detail" hidden></div>
         <p class="hint pad">Monday start. Each day shows trades (T), wins/losses (W/L), gross profit (P) / gross loss (L), net P&amp;L, and ending equity (E). Green/red shade = net P&amp;L; darker = larger |net P&amp;L| within the month. Week totals cover the days of the displayed month only. Click a day for its trades; PageUp/PageDown change month and arrow keys move between days.</p>
       </article>
-      <article class="panel span-6">
-        <div class="panel-head"><h3>Performance by Weekday</h3><span class="hint">Net P&amp;L (bars) and win rate (line)</span></div>
-        <div class="chart-box"><canvas id="weekdayChart" role="img" aria-label="Performance by weekday"></canvas></div>
-      </article>
-      <article class="panel span-6">
-        <div class="panel-head"><h3>Performance by Hour</h3><span class="hint">Net P&amp;L (bars) and trade count (line), by close hour<span id="hourNote" class="filter-note" hidden> Not filterable for a journal .md.</span></span></div>
-        <div class="chart-box"><canvas id="hourChart" role="img" aria-label="Performance by hour"></canvas></div>
-      </article>
     </div>
   </section>
 
-  <!-- ============================ BREAKDOWN ============================ -->
-  <section id="breakdown" class="dash-section" aria-labelledby="breakdownTitle">
+  <!-- ============================ STREAK ============================ -->
+  <section id="streak" class="dash-section" data-page="streak" aria-labelledby="streakTitle">
     <header class="section-head">
-      <h2 id="breakdownTitle" class="section-title">Where the edge is, and is not</h2>
-      <p class="section-desc">Results by instrument, setup and behaviour, plus the trades that moved the account most.</p>
+      <h2 id="streakTitle" class="section-title">Streak</h2>
+      <p class="section-desc">Winning and losing streaks, and how they cluster across your trade sequence.</p>
     </header>
     <div class="grid">
-      <article class="panel span-6">
-        <div class="panel-head"><h3>Performance by Instrument</h3><span class="hint">Net P&amp;L</span></div>
-        <div class="chart-box short"><canvas id="symbolChart" role="img" aria-label="Performance by instrument"></canvas></div>
-        <div id="symbolTable" class="table-wrap"></div>
-      </article>
-      <article class="panel span-6">
-        <div class="panel-head"><h3>Performance by Setup</h3><span class="hint">Setup inferred from trade timing and behaviour (no explicit strategy field)</span></div>
-        <div class="chart-box short"><canvas id="setupChart" role="img" aria-label="Performance by setup"></canvas></div>
-        <div id="setupTable" class="table-wrap"></div>
+      <article id="streaks" class="panel span-12">
+        <div class="panel-head"><h3>Streak Analysis</h3><span class="hint">Consecutive wins / losses<span class="filter-note" hidden> Streaks run across consecutive trades in the filtered list.</span></span></div>
+        <div id="streakStats" class="stat-list"></div>
       </article>
       <article class="panel span-12">
-        <div class="panel-head"><h3>Behaviour Tags</h3><span class="hint">Tags derived from trade timing (a trade can carry several)</span></div>
-        <div id="tagTable" class="table-wrap"></div>
-      </article>
-      <article id="trades" class="panel span-6">
-        <div class="panel-head"><h3>Best Trades</h3><span class="hint">Top 5 by net P&amp;L</span></div>
-        <div id="bestTable" class="table-wrap"></div>
-      </article>
-      <article class="panel span-6">
-        <div class="panel-head"><h3>Worst Trades</h3><span class="hint">Bottom 5 by net P&amp;L</span></div>
-        <div id="worstTable" class="table-wrap"></div>
+        <div class="panel-head"><h3>Streak Timeline</h3><span class="hint">Bar height = streak length (wins up, losses down)</span></div>
+        <div class="chart-box short"><canvas id="streakChart" role="img" aria-label="Streak timeline"></canvas></div>
+        <div id="streakStrip" class="strip" aria-label="Trade sequence"></div>
       </article>
     </div>
   </section>
 
   <!-- ============================ INSIGHTS ============================ -->
-  <section id="insights" class="dash-section" aria-labelledby="insightsTitle">
+  <section id="insights" class="dash-section" data-page="insights" aria-labelledby="insightsTitle">
     <header class="section-head">
-      <h2 id="insightsTitle" class="section-title">Behaviour and actions</h2>
+      <h2 id="insightsTitle" class="section-title">Insights</h2>
       <p class="section-desc">What the numbers say about your habits, and what to change first.</p>
     </header>
     <div class="grid">
@@ -346,14 +339,39 @@
         <div id="recGrid" class="card-grid one-col"></div>
       </article>
     </div>
+
+    <details id="journalNotes" class="collapsible" open>
+      <summary><h3 class="collapse-title">Journal findings and recommendations</h3><span class="hint">Written in your journal .md (sections 11 and 12)</span></summary>
+      <div class="grid">
+        <article class="panel span-6">
+          <div class="panel-head"><h3>Key Findings From Your Journal</h3><span class="hint">Section 11 of a journal .md</span></div>
+          <ol id="journalFindings" class="text-list"></ol>
+        </article>
+        <article class="panel span-6">
+          <div class="panel-head"><h3>Recommendations In Your Journal</h3><span class="hint">Section 12 of a journal .md</span></div>
+          <ul id="journalRecs" class="text-list"></ul>
+        </article>
+      </div>
+    </details>
   </section>
 
-  <!-- ============================ TRADE LOG + JOURNAL NOTES ============================ -->
-  <section id="tradeLog" class="dash-section" aria-labelledby="tradeLogTitle">
+  <!-- ============================ TRADES ============================ -->
+  <section id="trades" class="dash-section" data-page="trades" aria-labelledby="tradeLogTitle">
     <header class="section-head">
-      <h2 id="tradeLogTitle" class="section-title">Trade log</h2>
-      <p class="section-desc">Reference data: every trade in view, plus the notes written in a journal .md.</p>
+      <h2 id="tradeLogTitle" class="section-title">Trades</h2>
+      <p class="section-desc">Review individual trades: the trades that moved the account most, then the full log.</p>
     </header>
+
+    <div class="grid">
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Best Trades</h3><span class="hint">Top 5 by net P&amp;L</span></div>
+        <div id="bestTable" class="table-wrap"></div>
+      </article>
+      <article class="panel span-6">
+        <div class="panel-head"><h3>Worst Trades</h3><span class="hint">Bottom 5 by net P&amp;L</span></div>
+        <div id="worstTable" class="table-wrap"></div>
+      </article>
+    </div>
 
     <details id="allTradesBox" class="collapsible" open>
       <summary><h3 class="collapse-title">All Trades</h3><span class="hint">Every trade passing the active filters. Click a header to sort. Search also matches hidden Setup and Notes; use #3 to find Trade No 3.</span></summary>
@@ -394,20 +412,6 @@
             <span id="tradeLogStatus" class="hint" role="status" aria-live="polite"></span>
             <button type="button" class="btn ghost" data-page="next">Next</button>
           </div>
-        </article>
-      </div>
-    </details>
-
-    <details id="journalNotes" class="collapsible" open>
-      <summary><h3 class="collapse-title">Journal findings and recommendations</h3><span class="hint">Written in your journal .md (sections 11 and 12)</span></summary>
-      <div class="grid">
-        <article class="panel span-6">
-          <div class="panel-head"><h3>Key Findings From Your Journal</h3><span class="hint">Section 11 of a journal .md</span></div>
-          <ol id="journalFindings" class="text-list"></ol>
-        </article>
-        <article class="panel span-6">
-          <div class="panel-head"><h3>Recommendations In Your Journal</h3><span class="hint">Section 12 of a journal .md</span></div>
-          <ul id="journalRecs" class="text-list"></ul>
         </article>
       </div>
     </details>

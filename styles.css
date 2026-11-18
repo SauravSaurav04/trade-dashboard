@@ -99,6 +99,8 @@ code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; b
 main { max-width: 1480px; margin: 0 auto; padding: 20px 24px 8px; }
 main section { margin-bottom: 16px; }
 .dash-section { margin-bottom: 30px; }
+/* One page at a time; printing (html.printing, set on beforeprint) shows every page. */
+html:not(.printing) section[data-page]:not(.is-active) { display: none !important; }
 
 .section-head { margin: 4px 2px 12px; }
 .section-title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
@@ -243,6 +245,34 @@ main section { margin-bottom: 16px; }
 .dd-day.empty { background: var(--border); }
 .disc-badge.empty { color: var(--muted); background: rgba(139, 143, 156, 0.14); }
 @media (max-width: 480px) { .dd-rule { grid-template-columns: minmax(0, 1fr) auto; } .dd-status { grid-column: 1 / -1; } }
+
+/* ---------- Daily Trading Motivation & Limits ---------- */
+.daily-limits {
+  display: grid; grid-template-columns: minmax(280px, 5fr) 7fr; gap: 14px 32px; align-items: center;
+  margin-bottom: 12px; padding: 14px 22px;
+  background: linear-gradient(135deg, var(--panel-2) 0%, var(--panel) 60%);
+  border: 1px solid var(--border); border-top: 3px solid var(--blue); border-radius: var(--radius);
+}
+.daily-limits.green { border-top-color: var(--green); }
+.daily-limits.amber { border-top-color: var(--amber); }
+.daily-limits.red { border-top-color: var(--red); }
+.dl-main { display: grid; gap: 4px; min-width: 0; }
+.dl-message { font-size: 19px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.dl-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.dl-tile { display: grid; gap: 5px; align-content: start; padding: 10px 14px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.18); min-width: 0; }
+.dl-tile.green { border-left-color: var(--green); }
+.dl-tile.amber { border-left-color: var(--amber); }
+.dl-tile.red { border-left-color: var(--red); }
+.dl-tile-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+.dl-tile-head .disc-badge { padding: 1px 9px; font-size: 11.5px; white-space: nowrap; }
+.dl-value { font-size: 26px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.dl-value.green { color: var(--green); }
+.dl-value.amber { color: var(--amber); }
+.dl-value.red { color: var(--red); }
+@media (max-width: 1100px) { .daily-limits { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .daily-limits { padding: 12px 14px; } .dl-message { font-size: 17px; } }
+@media (max-width: 600px) { .dl-tiles { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .dl-value { font-size: 24px; } .dl-tile { padding: 12px; } }
 
 /* ---------- Stat lists ---------- */
 .stat-list { display: grid; gap: 0; margin-top: 12px; }
@@ -644,7 +674,7 @@ ul.text-list { list-style: square; }
   .topbar { position: static; background: none; backdrop-filter: none; border-bottom: 0; }
   .nav, .actions, .filter-drawer, .drawer-backdrop, .banner, .drop-overlay, .toggle, .strip-reset,
   .tradelog-controls, .tradelog-pager, #calScrollHint, .cal-nav .btn, #calDetailClose { display: none !important; }
-  .panel, .kpi, .card, .discipline { break-inside: avoid; }
+  .panel, .kpi, .card, .discipline, .daily-limits { break-inside: avoid; }
   .section-head, .collapsible > summary { break-after: avoid; }
   .cal-scroll, .tradelog-scroll { overflow: visible; max-height: none; }
   .cal-grid { min-width: 0; }

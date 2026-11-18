@@ -9,6 +9,7 @@
      3. ANALYSE   compute every statistic from the trade list        (analyze)
      4. INSIGHT   rule-based psychology insights + recommendations   (buildInsights)
      5. RENDER    KPI cards, Chart.js charts, calendar and tables    (render*)
+     5b. DAILY LIMITS  "remaining trades / available risk today" card from the unfiltered trades, always on top (renderDailyLimits)
 
    The CSV is the single source of truth: every number on the page is recomputed
    from its executions (a journal .md is still accepted and is reconciled against
@@ -21,8 +22,11 @@
    0. CONFIGURATION & SMALL HELPERS
    ========================================================================== */
 
-// Trading day runs 06:00 -> 05:59 and is decided by the opening time.
-const DAY_START_HOUR = 6;
+// Trading day runs 02:30 -> 02:29 the next morning (fixed IST clock time) and is decided by the opening time.
+// It matches the US 5 PM ET daily break during US daylight saving; in winter the real break is an hour later (03:30 IST).
+const DAY_START_MS = 2.5 * 3600000;
+// CSV times are IST wall-clock; this converts the real current time to that clock.
+const IST_OFFSET_MS = 5.5 * 3600000;
 // Hold at or under this many minutes counts as a scalp.
 const SCALP_MAX_MIN = 6;
 // Same-symbol entry within this many minutes of a losing close counts as a re-entry.
@@ -97,6 +101,11 @@ const dayLabel = d => `${pad2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]}`; // 0
 const weekdayIndex = d => (d.getUTCDay() + 6) % 7;                       // Mon=0 ... Sun=6
 const weekStart = d => new Date(d.getTime() - weekdayIndex(d) * 86400000); // Monday of that week
 
+/** Trading day of a wall-clock timestamp (epoch ms read as UTC): UTC midnight of the day whose 02:30 window contains it. */
+function tradingDayOf(ms) {
+  const d = new Date(ms - DAY_START_MS);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
 /** Split a markdown table row "| a | b |" into trimmed cells. */
 const splitRow = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
 /** Detects the "|---|:---:|" separator row. */
@@ -318,7 +327,7 @@ function previousClosed(byClose, t) {
  * Parse a broker export (one row per execution) into the same journal object parseJournal returns.
  *   - rows sharing a Position ID are the legs of one round-turn trade (paired by symbol and time if the IDs are unusable)
  *   - Net P&L is all-in: Profit + Swap + Commission over every leg
- *   - side/qty come from the opening leg; the trading day comes from the opening time (06:00 cut-off)
+ *   - side/qty come from the opening leg; the trading day comes from the opening time (02:30 IST cut-off)
  *   - trades are numbered and ordered by the required, unique "Trade No" column (the legacy export is numbered 1..n
  *     by trading day, then close time)
  *   - notes/tags (scalp, re-entry, size up, rollover, long hold) are derived from the timestamps
@@ -399,8 +408,7 @@ function parseTradesCsv(text) {
     const closers = legs.filter(l => !sameSide(l));
     if (!closers.length) { openPositions++; return; }
     const openMs = opener.time, closeMs = closers[closers.length - 1].time;
-    const tradingDay = new Date(openMs - DAY_START_HOUR * 3600000);
-    const date = new Date(Date.UTC(tradingDay.getUTCFullYear(), tradingDay.getUTCMonth(), tradingDay.getUTCDate()));
+    const date = tradingDayOf(openMs);
     trades.push({
       symbol: opener.symbol, side: opener.side,
       qty: sum(legs.filter(sameSide).map(l => l.qty)),
@@ -411,8 +419,7 @@ function parseTradesCsv(text) {
   });
 
   directTrades.forEach(t => {
-    const tradingDay = new Date(t.openMs - DAY_START_HOUR * 3600000);
-    const date = new Date(Date.UTC(tradingDay.getUTCFullYear(), tradingDay.getUTCMonth(), tradingDay.getUTCDate()));
+    const date = tradingDayOf(t.openMs);
     trades.push({ ...t, date, dateKey: dateKey(date), weekday: weekdayIndex(date) });
   });
 
@@ -1230,6 +1237,154 @@ function renderDailyDiscipline(a) {
     <div class="dd-right">
       <ul class="dd-rules" role="list" aria-label="Daily discipline rules">${rows}</ul>
       ${stripHtml({ noun: 'trading day', aria: 'Daily scores by trading day', items, sel })}
+    </div>`;
+}
+
+/* --------------------------------------------------------------------------
+   Daily Trading Motivation & Limits - a live "what is left today" card shown before the next trade.
+   It always reads the full, unfiltered trade list for the current trading day, so filters never change it.
+   Unlike the "Max daily risk" rule above (loss vs. a fixed cap), the risk here is a budget that also grows with profit.
+   -------------------------------------------------------------------------- */
+
+/** Colour thresholds for the card; tune them here. */
+const DAILY_LIMITS_THRESHOLDS = Object.freeze({
+  tradesAmberFrom: 0.6, // trades: amber once this share of the limit is used, red at the limit
+  riskGreenFrom: 0.6,   // risk: green while at least this share of the starting budget remains, red at zero
+});
+
+/** Rotating headline (picked by trading day). Easy to edit or translate. */
+const DAILY_MOTIVATION = [
+  'Welcome back! Prove to yourself that you are a disciplined trader today.',
+  'Today\'s goal: Protect your capital, follow your rules, and trade with discipline.',
+  'One good trade is worth more than five impulsive ones. Wait for your setup.',
+  'Your edge is your discipline. Protect your capital first.',
+  'Patience is a position. No setup, no trade.',
+  'Plan the trade, then trade the plan. Let the market come to you.',
+  'Consistency beats intensity. Small, disciplined steps build the account.',
+  'Take only the trades your plan approves, and let the rest go.',
+];
+
+/** State messages; they take priority over the rotating headline. */
+const DAILY_LIMIT_MESSAGES = Object.freeze({
+  tradesOver: n => `Trade limit exceeded by ${n} - stop trading for today.`,
+  tradesDone: 'You have used all your trades today. Close the platform and review.',
+  riskDone: 'Risk budget used up. Protect your capital - stop for today.',
+  goodDay: 'Good discipline so far. Stay patient and protect your gains.',
+});
+
+const TRADING_DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Calendar-valid YYYY-MM-DD (rejects 2026-02-31). */
+function isValidDayKey(key) {
+  if (!TRADING_DAY_KEY_RE.test(key)) return false;
+  const d = new Date(`${key}T00:00:00Z`);
+  return !isNaN(d) && dateKey(d) === key;
+}
+
+/**
+ * The trading day "now" belongs to, as YYYY-MM-DD. CSV times are IST wall-clock, so the current time is first
+ * converted to IST (whatever the browser's time zone), then resolved with the same rule as the imported trades.
+ * `?today=YYYY-MM-DD` overrides it (for demos and for historical files).
+ */
+function currentTradingDayKey(nowMs = Date.now(), search = typeof location !== 'undefined' ? location.search : '') {
+  const forced = new URLSearchParams(search).get('today');
+  if (forced && isValidDayKey(forced)) return forced;
+  return dateKey(tradingDayOf(nowMs + IST_OFFSET_MS));
+}
+
+/** Limits left for one trading day, from the full (unfiltered) trade list. Pure; no DOM. */
+function dailyLimitsStatus(allTrades, dayKey, cfg = DAILY_DISCIPLINE_CONFIG) {
+  const th = DAILY_LIMITS_THRESHOLDS;
+  const today = allTrades.filter(t => t.dateKey === dayKey);
+  const pnls = today.map(t => (Number.isFinite(t.pnl) ? t.pnl : 0));
+  const tradesToday = today.length;
+  const maxTrades = cfg.maxTradesPerDay;
+  const riskBudget = cfg.maxDailyRisk;
+  const netPnl = cents(sum(pnls)) + 0; // + 0 turns -0 into 0
+  const grossWins = cents(sum(pnls.filter(p => p > 0)));
+  const grossLosses = cents(-sum(pnls.filter(p => p < 0))) + 0;
+  const rawRisk = cents(riskBudget + netPnl);
+  const availableRisk = Math.max(0, rawRisk);
+
+  const tradesUsedRatio = maxTrades > 0 ? Math.min(1, tradesToday / maxTrades) : 1;
+  const riskRemainingRatio = riskBudget > 0 ? Math.min(1, availableRisk / riskBudget) : (availableRisk > 0 ? 1 : 0);
+  const riskExhausted = rawRisk <= 0;
+  const tradesLevel = tradesToday >= maxTrades ? 'red' : tradesUsedRatio >= th.tradesAmberFrom ? 'amber' : 'green';
+  const riskLevel = riskExhausted ? 'red' : riskRemainingRatio >= th.riskGreenFrom ? 'green' : 'amber';
+  const level = [tradesLevel, riskLevel].includes('red') ? 'red' : [tradesLevel, riskLevel].includes('amber') ? 'amber' : 'green';
+
+  return {
+    dayKey, tradesToday, maxTrades,
+    remainingTrades: Math.max(0, maxTrades - tradesToday),
+    overTrades: Math.max(0, tradesToday - maxTrades),
+    tradesUsedRatio, tradesLevel,
+    netPnl, grossWins, grossLosses,
+    riskBudget, availableRisk, riskOvershoot: Math.max(0, -rawRisk),
+    riskUsedRatio: 1 - riskRemainingRatio, riskRemainingRatio, riskExhausted, riskLevel,
+    level,
+  };
+}
+
+/** Headline for the card: a limit message when one is hit, else the day's rotating motivation. */
+function dailyLimitsMessage(s) {
+  const M = DAILY_LIMIT_MESSAGES;
+  if (s.overTrades > 0) return M.tradesOver(s.overTrades);
+  if (s.riskExhausted) return M.riskDone;
+  if (s.tradesToday >= s.maxTrades) return M.tradesDone;
+  if (s.level === 'green' && s.netPnl > 0) return M.goodDay;
+  const [y, m, d] = s.dayKey.split('-').map(Number);
+  const dayOfYear = Math.round((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 86400000);
+  return DAILY_MOTIVATION[((dayOfYear % DAILY_MOTIVATION.length) + DAILY_MOTIVATION.length) % DAILY_MOTIVATION.length];
+}
+
+const DAILY_LIMIT_BADGES = {
+  trades: { green: '✓ On track', amber: '! Careful', red: '✕ Limit reached' },
+  risk: { green: '✓ On track', amber: '! Careful', red: '✕ Limit reached' },
+};
+
+function renderDailyLimits() {
+  const el = $('dailyLimitsCard');
+  if (!fullJournal) { el.hidden = true; el.innerHTML = ''; return; }
+  const s = dailyLimitsStatus(fullJournal.trades, currentTradingDayKey());
+  const day = new Date(`${s.dayKey}T00:00:00Z`);
+  const dayText = `${WEEKDAYS[weekdayIndex(day)]} ${dayLabel(day)}`;
+  const caption = `Trading day: ${dayText} · Max ${plural(s.maxTrades, 'trade')} · ${money(s.riskBudget)} risk budget`;
+  const tradesSub = s.overTrades
+    ? `Trade limit exceeded by ${s.overTrades}`
+    : s.tradesToday ? `${s.remainingTrades} left of ${s.maxTrades}` : 'No trades taken yet today';
+  const formula = `${money(s.riskBudget)} start${s.grossWins ? ` + ${money(s.grossWins)}` : ''}${s.grossLosses ? ` - ${money(s.grossLosses)}` : ''} = ${money(s.availableRisk)} available`;
+  const limit = `${money(s.riskBudget)} daily risk limit`;
+  const riskNote = s.riskOvershoot ? `Risk limit exceeded by ${money(s.riskOvershoot)}`
+    : s.riskExhausted ? 'Risk limit reached'
+    : s.netPnl < 0 ? `${money(s.availableRisk)} of ${money(s.riskBudget)} risk remaining`
+    : limit;
+  // A loss that is still within the limit stays neutral; the badge and bar carry the status.
+  const pnlClass = s.netPnl > 0 ? 'green' : s.netPnl < 0 && s.riskLevel !== 'green' ? s.riskLevel : '';
+  const pctW = r => (Math.max(0, Math.min(1, r)) * 100).toFixed(1);
+
+  el.hidden = false;
+  // Update the level in place: the page router keeps `is-active` on this element, and a full className reset would drop it.
+  el.classList.remove('green', 'amber', 'red');
+  el.classList.add('daily-limits', s.level);
+  el.innerHTML = `
+    <div class="dl-main">
+      <div class="kpi-label">Today's Discipline Plan</div>
+      <p class="dl-message">${esc(dailyLimitsMessage(s))}</p>
+      <div class="kpi-sub">${esc(caption)}</div>
+    </div>
+    <div class="dl-tiles">
+      <div class="dl-tile ${s.tradesLevel}">
+        <div class="dl-tile-head">        <span class="kpi-label">Trades Taken Today</span><span class="disc-badge ${s.tradesLevel}">${esc(DAILY_LIMIT_BADGES.trades[s.tradesLevel])}</span></div>
+                <div class="dl-value ${s.tradesLevel}" aria-live="polite">${s.tradesToday} / ${s.maxTrades}</div>
+        <span class="disc-bar" role="img" aria-label="Trades used: ${s.tradesToday} of ${s.maxTrades}"><span class="disc-fill ${s.tradesLevel}" style="width:${pctW(s.tradesUsedRatio)}%"></span></span>
+        <div class="kpi-sub">${esc(tradesSub)}</div>
+      </div>
+      <div class="dl-tile ${s.riskLevel}">
+        <div class="dl-tile-head">        <span class="kpi-label">Current Risk Status</span><span class="disc-badge ${s.riskLevel}">${esc(DAILY_LIMIT_BADGES.risk[s.riskLevel])}</span></div>
+                <div class="dl-value ${pnlClass}" aria-live="polite" title="${esc(formula)}">${esc(money(s.netPnl, true))}</div>
+                <span class="disc-bar" role="img" aria-label="Daily P&amp;L ${esc(money(s.netPnl, true))}; ${esc(money(Math.max(0, -s.netPnl)))} of the ${esc(money(s.riskBudget))} risk limit used"><span class="disc-fill ${s.riskLevel}" style="width:${pctW(s.riskUsedRatio)}%"></span></span>
+                <div class="kpi-sub" title="${esc(formula)}">${esc(riskNote)}</div>
+      </div>
     </div>`;
 }
 
@@ -2286,7 +2441,6 @@ function trapFocus(e) {
 function syncStickyOffsets() {
   const h = document.querySelector('.topbar').offsetHeight;
   document.documentElement.style.setProperty('--sticky-h', `${h}px`);
-  if (h !== spy.height) { spy.height = h; observeSections(); }
 }
 
 /** Keep the address bar in step with the filters, alongside any other query params (?file=). */
@@ -2860,11 +3014,13 @@ function wireTradeLog() {
 }
 
 /* ==========================================================================
-   9. NAVIGATION  -  scroll-spy, back to top, collapsible sections, print
+   9. NAVIGATION  -  page tabs (hash routing), collapsible sections, print
    ========================================================================== */
 
 const STORE_COLLAPSED = 'tj.collapsed';
-const spy = { ids: [], links: [], alias: {}, visible: new Set(), observer: null, atEnd: false, locked: false, lockTimer: 0, height: -1 };
+const pageNav = { ids: [], links: [], current: '' };
+// Anchors from older versions of the page that no longer exist as element ids.
+const PAGE_ALIASES = { risk: 'performance', breakdown: 'performance', tradeLog: 'trades' };
 const collapsedIds = new Set();
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2884,53 +3040,44 @@ function updateNavFade() {
 }
 
 function setActiveNav(id) {
-  spy.links.forEach(a => {
+  pageNav.links.forEach(a => {
     const on = a.hash === `#${id}`;
     a.classList.toggle('active', on);
-    if (on) { a.setAttribute('aria-current', 'true'); scrollNavTo(a); } else a.removeAttribute('aria-current');
+    if (on) { a.setAttribute('aria-current', 'page'); scrollNavTo(a); } else a.removeAttribute('aria-current');
   });
 }
 
-function updateSpy() {
-  if (spy.locked) return;
-  // Targets can nest (#pnl sits inside #performance); the later id is the more specific one.
-  const seen = new Set([...spy.visible].map(x => spy.alias[x] || x));
-  const id = spy.atEnd ? spy.ids[spy.ids.length - 1] : [...spy.ids].reverse().find(x => seen.has(x));
-  if (id) setActiveNav(id);
+/** The page (nav section) that holds an element id, or that an older anchor now belongs to. */
+function pageOf(id) {
+  if (PAGE_ALIASES[id]) return PAGE_ALIASES[id];
+  const el = id ? document.getElementById(id) : null;
+  const holder = el && el.closest('section[data-page]');
+  return holder ? holder.dataset.page : null;
 }
 
-/**
- * Highlight the section crossing a thin line a little below the sticky bar. Rebuilt whenever the bar's height or
- * the viewport changes, because rootMargin cannot follow either on its own.
- */
-function observeSections() {
-  if (typeof IntersectionObserver === 'undefined' || !spy.ids.length) return;
-  if (spy.observer) spy.observer.disconnect();
-  spy.visible.clear();
-  const vh = document.documentElement.clientHeight;
-  const top = document.querySelector('.topbar').offsetHeight;
-  // The band must be taller than the 16px gap between panels, or the line can fall in the gap and match only the parent section.
-  const band = 24;
-  const line = Math.min(vh - band, top + Math.round((vh - top) * 0.3));
-  spy.observer = new IntersectionObserver(entries => {
-    entries.forEach(e => { if (e.isIntersecting) spy.visible.add(e.target.id); else spy.visible.delete(e.target.id); });
-    updateSpy();
-  }, { rootMargin: `-${line}px 0px -${Math.max(0, vh - line - band)}px 0px` });
-  spy.ids.concat(Object.keys(spy.alias)).forEach(id => { const el = $(id); if (el) spy.observer.observe(el); });
+/** Show one page and hide the rest. Returns true when the page changed. */
+function showPage(id) {
+  if (!pageNav.ids.includes(id)) return false;
+  const changed = id !== pageNav.current;
+  pageNav.current = id;
+  document.querySelectorAll('section[data-page]').forEach(s => s.classList.toggle('is-active', s.dataset.page === id));
+  setActiveNav(id);
+  if (changed) {
+    // Charts and the calendar were laid out while hidden; re-measure them now that the page is visible.
+    Object.values(charts).forEach(c => c.resize());
+    updateCalendarHint();
+  }
+  return changed;
 }
 
-/** Hold the clicked highlight until the smooth scroll ends, so it does not flicker through the sections in between. */
-function lockSpy() {
-  spy.locked = true;
-  clearTimeout(spy.lockTimer);
-  const release = () => {
-    clearTimeout(spy.lockTimer);
-    window.removeEventListener('scrollend', release);
-    spy.locked = false;
-    updateSpy();
-  };
-  window.addEventListener('scrollend', release);
-  spy.lockTimer = setTimeout(release, 1500);
+/** Route to the page named by the URL hash (a page id, or any element id inside a page) and scroll to the target. */
+function goToHash() {
+  const id = location.hash.slice(1);
+  const changed = showPage(pageOf(id) || pageNav.current || pageNav.ids[0]);
+  revealTarget(id);
+  const el = id ? document.getElementById(id) : null;
+  if (el && !el.matches('section[data-page]')) el.scrollIntoView();
+  else if (changed || el) window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 function setCollapsed(id, isClosed) {
@@ -2954,30 +3101,24 @@ function wireCollapsibles() {
     box.querySelector('summary').addEventListener('click', () => setCollapsed(box.id, box.open));
   });
   // Closed <details> content does not print, so open everything for the print job and restore afterwards.
+  // Every page prints, so reveal them all (and re-measure the charts) first.
   let before = [];
-  window.addEventListener('beforeprint', () => { before = boxes.map(b => b.open); boxes.forEach(b => { b.open = true; }); });
-  window.addEventListener('afterprint', () => boxes.forEach((b, i) => { b.open = before[i]; }));
+  const setPrinting = on => {
+    document.documentElement.classList.toggle('printing', on);
+    Object.values(charts).forEach(c => c.resize());
+  };
+  window.addEventListener('beforeprint', () => { before = boxes.map(b => b.open); boxes.forEach(b => { b.open = true; }); setPrinting(true); });
+  window.addEventListener('afterprint', () => { boxes.forEach((b, i) => { b.open = before[i]; }); setPrinting(false); });
 }
 
 function wireNav() {
   const nav = $('mainNav');
-  spy.links = [...nav.querySelectorAll('a[href^="#"]')];
-  spy.ids = spy.links.map(a => a.hash.slice(1));
-  // data-also lists further sections that belong to a link (e.g. P&L By Period under P&L).
-  spy.links.forEach(a => (a.dataset.also || '').split(' ').filter(Boolean).forEach(id => { spy.alias[id] = a.hash.slice(1); }));
+  pageNav.links = [...nav.querySelectorAll('a[href^="#"]')];
+  pageNav.ids = pageNav.links.map(a => a.hash.slice(1));
+  showPage(pageNav.ids[0]);
 
-  // Handles the nav and in-page links such as "All insights"; the browser still performs the smooth scroll.
-  const onAnchor = e => {
-    const a = e.target.closest('a[href^="#"]');
-    if (!a || a.hash.length < 2) return;
-    revealTarget(a.hash.slice(1));
-    const section = $(a.hash.slice(1));
-    const owner = section && [...spy.ids].reverse().find(id => $(id).contains(section));
-    if (owner) { setActiveNav(owner); lockSpy(); }
-  };
-  nav.addEventListener('click', onAnchor);
-  $('dashboardContent').addEventListener('click', onAnchor);
-  window.addEventListener('hashchange', () => revealTarget(location.hash.slice(1)));
+  // Nav links change the hash; the browser's own jump finds nothing (the target page is hidden), then this shows the page.
+  window.addEventListener('hashchange', goToHash);
 
   document.querySelectorAll('a[href="#top"]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
@@ -2986,11 +3127,6 @@ function wireNav() {
 
   nav.addEventListener('scroll', updateNavFade, { passive: true });
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateNavFade).observe(nav);
-  window.addEventListener('resize', debounce(observeSections, 200));
-  if (typeof IntersectionObserver !== 'undefined') {
-    // The last section can be too short to reach the highlight line, so reaching the footer selects it.
-    new IntersectionObserver(([e]) => { spy.atEnd = e.isIntersecting; updateSpy(); }, { threshold: 1 }).observe(document.querySelector('.footer'));
-  }
   wireCollapsibles();
 }
 
@@ -3059,6 +3195,7 @@ function loadFile(text, name) {
     $('filterToggle').hidden = false;
     $('mainNav').hidden = false;
     $('dashboard').hidden = false;
+    renderDailyLimits();
     showError('');
     $('chartBanner').hidden = chartsAvailable();
     renderMultiOptions();
@@ -3071,14 +3208,12 @@ function loadFile(text, name) {
     if (deepLinkPending) {
       // Old bookmarks such as #equity could not scroll while the dashboard was hidden.
       deepLinkPending = false;
-      revealTarget(location.hash.slice(1));
-      const target = document.getElementById(location.hash.slice(1));
-      if (target) requestAnimationFrame(() => target.scrollIntoView());
+      requestAnimationFrame(goToHash);
     } else {
       // A file the user picks starts at Overview, not at a stale hash or restored scroll position.
       try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (err) { /* file:// */ }
       window.scrollTo({ top: 0, behavior: 'instant' });
-      setActiveNav(spy.ids[0]);
+      showPage(pageNav.ids[0]);
     }
   } catch (err) {
     console.error(err);
@@ -3199,6 +3334,8 @@ function wireUi() {
   wireCardPick('dailyDisciplineCard', 'ddDay', 'daily', renderDailyDiscipline);
   // Click anywhere outside an open dropdown closes it (Columns menu and the symbol/setup filter menus).
   document.addEventListener('click', e => { closeColMenu(e.target); closeMenus(e.target); });
+  // The trading day rolls over at 02:30 IST; refresh the daily limits when the tab comes back.
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && fullJournal) renderDailyLimits(); });
   bindToggle('equityToggle', 'type', v => { equityType = v; if (currentAnalytics) renderEquityChart(currentAnalytics, v); });
   bindToggle('pnlToggle', 'type', v => { pnlType = v; if (currentAnalytics) renderPnlCurveChart(currentAnalytics, v); });
   bindToggle('periodToggle', 'period', v => { periodType = v; if (currentAnalytics) { renderPeriodChart(currentAnalytics, v); labelCharts(currentAnalytics); } });
@@ -3243,5 +3380,5 @@ if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', boot);
 }
 if (typeof module !== 'undefined') {
-  module.exports = { parseJournal, parseTradesCsv, analyze, reconcile, buildInsights, parseMoney, formatDayMetrics, applyFilters, defaultFilters, TRADE_COLUMNS, pickColumns, matchTrades, sortTrades, tradeLogRows, pageWindow, tradeRowHtml, tradeFooterHtml, buildCsv };
+  module.exports = { parseJournal, parseTradesCsv, analyze, reconcile, buildInsights, parseMoney, formatDayMetrics, applyFilters, defaultFilters, TRADE_COLUMNS, pickColumns, matchTrades, sortTrades, tradeLogRows, pageWindow, tradeRowHtml, tradeFooterHtml, buildCsv, currentTradingDayKey, tradingDayOf, dailyLimitsStatus, dailyLimitsMessage };
 }
